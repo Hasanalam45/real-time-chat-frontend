@@ -3,8 +3,6 @@ import { axiosInstance } from "../lib/axios.js"
 import toast from "react-hot-toast";
 import { io } from "socket.io-client";
 
-const devurl = import.meta.env.VITE_REACT_APP_URL
-const BASE_URL = "http://localhost:5001/"
 
 export const useAuthStore = create((set, get) => ({
     authUser: null,   //default user state is null 
@@ -136,11 +134,30 @@ export const useAuthStore = create((set, get) => ({
         // ✅ Prevent double connection
         if (socket && socket.connected) return;
 
+        // Get socket URL - use dedicated env var or derive from API URL
+        let socketUrl = import.meta.env.VITE_REACT_APP_SOCKET_URL;
+
+        // If SOCKET_URL not set, derive from API URL (remove /api if present)
+        if (!socketUrl) {
+            const apiUrl = import.meta.env.VITE_REACT_APP_URL || '';
+            socketUrl = apiUrl.replace(/\/api\/?$/, ''); // Remove /api from end
+        }
+
+        if (!socketUrl) {
+            console.error('❌ Socket URL not configured. Set VITE_REACT_APP_SOCKET_URL or VITE_REACT_APP_URL');
+            return;
+        }
+
+        console.log('🔌 Connecting to socket:', socketUrl);
+
         // 🔒 Use full production URL with websocket-only transport
-        const newSocket = io(import.meta.env.VITE_REACT_APP_SOCKET_URL, {
+        const newSocket = io(socketUrl, {
             query: { userId: authUser.data._id },
             transports: ["websocket"], // 🔥 Force websocket to avoid fallback issues
             withCredentials: true,
+            reconnection: true,
+            reconnectionAttempts: 5,
+            reconnectionDelay: 1000,
         });
 
         set({ socket: newSocket });
@@ -149,13 +166,17 @@ export const useAuthStore = create((set, get) => ({
             console.log("✅ Socket connected:", newSocket.id);
         });
 
+        newSocket.on("connect_error", (error) => {
+            console.error("❌ Socket connection error:", error.message);
+        });
+
         newSocket.on("getOnlineUsers", (userIds) => {
             console.log("📡 Online users:", userIds);
             set({ onlineUsers: userIds });
         });
 
-        newSocket.on("disconnect", () => {
-            console.log("❌ Socket disconnected");
+        newSocket.on("disconnect", (reason) => {
+            console.log("❌ Socket disconnected:", reason);
         });
     },
 
